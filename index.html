@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+
+<head>
+  <title>SQLite Test</title>
+  <style>
+    * {
+      font-weight: bolder;
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 14px;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      padding: 0;
+      margin: 0;
+    }
+
+    body {
+      display: flex;
+      flex-direction: column;
+    }
+
+    #toolbar {
+      background-color: rgb(200, 10, 10);
+      box-shadow: -5px 5px 5px rgb(100, 0, 0);
+      padding: 4px;
+      display: flex;
+      flex-flow: row;
+    }
+
+    button {
+      padding: 8px;
+      margin: 8px;
+      border-radius: 8px;
+    }
+
+    th,
+    td {
+      padding: 8px;
+      border: solid rgb(80, 80, 80) 1px;
+      text-align: center;
+    }
+
+    th {
+      background-color: rgb(200, 200, 200);
+      font-size: 14px;
+    }
+
+    td {
+      font-size: 12px;
+      padding-top: 5px;
+      padding-bottom: 5px;
+    }
+
+    .middleview {
+      margin: 0px;
+      display: inline-flex;
+      width: 100%;
+      flex-grow: 1;
+      overflow: hidden;
+    }
+
+    #input {
+      box-sizing: border-box;
+      padding: 8px;
+      margin: 0px;
+      width: 100%;
+      height: 50px;
+      resize: none;
+
+      border: none;
+      box-shadow: inset 0 10px 10px -5px rgb(100, 0, 0), inset 10px 0 10px -5px rgb(0, 0, 0, 0.75);
+      background-color: white;
+    }
+
+    .code {
+      font-family: "Consolas";
+      font-size: 14px;
+    }
+
+    #cons {
+      box-sizing: border-box;
+      padding: 8px;
+      background-color: black;
+      color: white;
+      width: 100%;
+      flex-grow: 1;
+      overflow-y: auto;
+    }
+
+    .right {
+      float: right;
+      display: flex;
+      flex-direction: column;
+
+      flex-grow: 0;
+      flex-shrink: 1;
+      overflow-x: auto;
+    }
+
+    .left {
+      flex-direction: row;
+      flex-wrap: wrap;
+
+      flex-grow: 1;
+      flex-shrink: 0;
+      flex-basis: 50%;
+    }
+
+    .sides {
+      flex-grow: 1;
+      width: 100%;
+    }
+
+    #tableView {
+      display: flex;
+      flex-direction: row;
+      flex-wrap: wrap;
+      margin: 8px;
+
+      overflow-y: auto;
+      max-height: 100%;
+    }
+
+    #tableView table {
+      height: min-content;
+    }
+
+    table {
+      border-spacing: 0;
+    }
+
+    #tableView .tableContent {
+      height: min-content;
+      box-shadow: 0px 0px 8px rgb(0, 0, 0, 0.5);
+      margin: 8px;
+      border-radius: 8px;
+    }
+
+    .table-name {
+      padding: 4px;
+      text-align-last: center;
+    }
+
+    .combined-line {
+      padding-bottom: 8px;
+    }
+
+    .error {
+      color: red;
+    }
+
+    .user {
+      color: rgb(170, 170, 170);
+    }
+
+    .indicator {
+      width: 24px;
+      text-align: left;
+      align-items: center;
+    }
+
+    .input-line {
+      display: flex;
+      background-color: rgb(220, 220, 220);
+      align-items: center;
+    }
+
+    .line {
+      display: flex;
+    }
+
+    #dragBar {
+      flex-grow: 0;
+      flex-shrink: 0;
+      width: 6px;
+      background-color: rgb(200, 10, 10);
+      cursor: col-resize;
+      box-shadow: -5px 0px 5px rgb(100, 0, 0);
+    }
+
+    .selected {
+      box-shadow: 0 0 10px 2px white;
+    }
+  </style>
+</head>
+
+<body>
+  <script src="./sql-wasm.js"></script>
+  <div id="toolbar">
+    <button onclick=clearCache();>🗑️ Clear Cache</button>
+    <button onclick=createTest();>📋 Create Test</button>
+  </div>
+  <div class="middleview">
+    <div class="left sides" id="left">
+      <div id="tableView"></div>
+    </div>
+    <div id="dragBar"></div>
+    <div class="right sides">
+      <div class="input-line">
+        <div class="indicator">></div>
+        <textarea id="input" onkeydown="inputKeyDown(event)" class="code"></textarea>
+      </div>
+      <div id="cons" class="code"></div>
+    </div>
+  </div>
+  <script>
+    cons.innerHTML = window.localStorage.getItem("console");
+    const TABLE_LIST = "tb_tables";
+    let SQL;
+    let db;
+    load();
+    async function load() {
+      SQL = await initSqlJs({
+        locateFile: file => `./${file}`
+      });
+      db = await loadOrCreateDatabase();
+
+      let tableNames = await db.exec("SELECT name FROM sqlite_master WHERE type='table'")
+      if (tableNames.length > 0) {
+        tableNames[0].columns[0] = "Tables";
+        tableView.appendChild(createHTMLTable(tableNames, null));
+        tableNames = tableNames[0].values;
+        for (i in tableNames) {
+          const tableName = tableNames[i][0];
+          let output = await db.exec("SELECT * FROM " + tableName + ";");
+          if (output.length > 0)
+            tableView.appendChild(createHTMLTable(output, tableName));
+        }
+      }
+    }
+
+    // middle dragbar js
+    let isMouseDown = false
+    dragBar.addEventListener('mousedown', (event) => {
+      isMouseDown = true;
+      document.body.addEventListener('mousemove', mouseMove);
+      document.body.addEventListener('mouseup', end);
+      event.preventDefault();
+    });
+    function mouseMove(event) {
+      if (isMouseDown) {
+        left.style.flexBasis = event.clientX + "px";
+      } else {
+        end();
+      }
+    }
+    const end = (e) => {
+      isMouseDown = false;
+      dragBar.removeEventListener('mousemove', mouseMove);
+      document.body.removeEventListener('mouseup', end);
+    }
+
+    async function createTest() {
+      db.exec("CREATE TABLE IF NOT EXISTS Persons (PersonID INTEGER PRIMARY KEY, Name varchar(255), Age int, City varchar(255));");
+      db.exec("INSERT INTO Persons (Name, Age, City) VALUES ('Franz', 32, 'Berlin');");
+      await refreshView();
+    }
+
+    let cachedInput = null;
+    let selectedElement = null;
+    async function inputKeyDown(event) {
+      if (event.key == "Enter") {
+        removeSelection();
+        const combinedLine = document.createElement("div");
+        combinedLine.classList.add("combined-line");
+        combinedLine.appendChild(createConsoleLine(input.value, "user"));
+        try {
+          const output = db.exec(input.value);
+          if (output.length > 0) {
+            combinedLine.appendChild(createConsoleLine(JSON.stringify(output), "output"));
+
+            const line = createConsoleLine("", "table");
+            const table = createHTMLTable(output, null);
+            table.style.backgroundColor = "white";
+            table.style.color = "black";
+            line.appendChild(table);
+            combinedLine.appendChild(line);
+          }
+        } catch (error) {
+          combinedLine.appendChild(createConsoleLine(error.message, "error"));
+        }
+        cons.insertBefore(combinedLine, cons.firstChild);
+        input.value = "";
+        event.preventDefault();
+        await refreshView();
+      } else if (event.key == "ArrowUp") {
+        changeSelection(true);
+        event.preventDefault();
+      } else if (event.key == "ArrowDown") {
+        changeSelection(false);
+        event.preventDefault();
+      } else {
+        removeSelection();
+      }
+    }
+
+    function removeSelection() {
+      if (selectedElement != null) {
+        selectedElement.classList.remove("selected");
+        selectedElement = null;
+      }
+    }
+
+    function changeSelection(changeUp) {
+      const elements = cons.getElementsByClassName("combined-line");
+
+      if (selectedElement == null) {
+        if (changeUp) {
+          cachedInput = input.value;
+          selectedElement = elements[0];
+          selectionChanged();
+        }
+        return;
+      } else {
+        selectedElement.classList.remove("selected");
+        if (changeUp) {
+          const next = selectedElement.nextSibling;
+          if (next != null) {
+            selectedElement = next;
+          }
+        } else {
+          selectedElement = selectedElement.previousSibling;
+          if (selectedElement == null) {
+            input.value = cachedInput;
+            return;
+          }
+        }
+      }
+      selectionChanged();
+    }
+
+    function selectionChanged() {
+      selectedElement.classList.add("selected");
+      const userText = selectedElement.getElementsByClassName("user")[0].firstChild.nextSibling.innerHTML;
+      input.value = userText;
+    }
+
+    function createConsoleLine(text, type) {
+      const line = document.createElement("div");
+      line.classList.add(type);
+      line.classList.add("line");
+      const indicator = document.createElement("div");
+      if (type == "user")
+        indicator.innerHTML = ">";
+      indicator.classList.add("indicator");
+      line.appendChild(indicator);
+      const textField = document.createElement("div");
+      textField.innerHTML = text;
+      line.appendChild(textField);
+      return line;
+    }
+
+    async function refreshView() {
+      saveDatabase(db.export());
+      tableView.innerHTML = "";
+      await load();
+    }
+
+    window.onbeforeunload = function (event) {
+      saveDatabase(db.export());
+      window.localStorage.setItem("console", cons.innerHTML);
+    };
+
+    async function clearCache() {
+      db.close();
+      window.localStorage.setItem("db", "");
+      window.localStorage.setItem("console", "");
+      cons.innerHTML = "";
+      tableView.innerHTML = "";
+      await load();
+    }
+
+    async function loadOrCreateDatabase() {
+      const db = await loadDataBase();
+      if (db === null)
+        return createDataBase();
+      return db;
+    }
+
+    function createDataBase() {
+      return new SQL.Database();
+    }
+
+    // retrieve a database from local storage
+    function loadDataBase() {
+      const data = window.localStorage.getItem("db");
+      if (data == "") {
+        return null;
+      }
+      return new SQL.Database(hexToDecimalArray(data));;
+    }
+
+    // write a database into local storage
+    function saveDatabase(data) {
+      data = decimalToHexString(data);
+      window.localStorage.setItem("db", data);
+    }
+
+    function decimalToHexString(decimalArray) {
+      const hexArray = [];
+      for (const integer of decimalArray) {
+        let hex = integer.toString(16);
+        if (hex.length === 1) {
+          hex = `0${hex}`;
+        }
+        hexArray.push(hex);
+      }
+      return hexArray.join("");
+    }
+
+    function hexToDecimalArray(hexString) {
+      const hexArray = hexString.match(/.{1,2}/g);
+      const decimalArray = new Uint8Array(hexArray.length);
+      for (let i = 0; i < hexArray.length; i++) {
+        const c = hexArray[i];
+        decimalArray[i] = Number.parseInt(c, 16);
+      }
+      return decimalArray;
+    }
+
+    function createHTMLTable(sqlOutput, tableName) {
+      if (sqlOutput.length == 0)
+        return;
+      const tableContent = document.createElement("div");
+
+      if (tableName != null) {
+        const name = document.createElement("div");
+        name.classList.add("table-name");
+        name.innerHTML = tableName;
+        tableContent.appendChild(name);
+      }
+
+      tableContent.classList.add("tableContent");
+      const table = document.createElement("table");
+      // header
+      let tr = document.createElement("tr");
+      for (const header of sqlOutput[0].columns) {
+        const th = document.createElement("th");
+        th.innerHTML = header;
+        tr.appendChild(th);
+      }
+      table.appendChild(tr);
+
+      // body
+      for (const row of sqlOutput[0].values) {
+        let tr = document.createElement("tr");
+        for (const value of row) {
+          const td = document.createElement("td");
+          td.innerHTML = value;
+          tr.appendChild(td);
+        }
+        table.appendChild(tr);
+      }
+
+      tableContent.appendChild(table);
+      return tableContent;
+    }
+  </script>
+</body>
+
+</html>
