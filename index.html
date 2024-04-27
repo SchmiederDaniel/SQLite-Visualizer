@@ -387,9 +387,8 @@
     // retrieve a database from local storage
     function loadDataBase() {
       const data = window.localStorage.getItem("db");
-      if (data == "") {
+      if(data == undefined || data == null || data == "")
         return null;
-      }
       return new SQL.Database(hexToDecimalArray(data));;
     }
 
